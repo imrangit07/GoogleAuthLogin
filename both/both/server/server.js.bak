@@ -1,0 +1,60 @@
+import express from "express";
+import dotenv from "dotenv";
+import cors from "cors";
+import ConnectDB from "./Config/ConnectDB.js";
+import authRoutes from "./Routes/auth.js";
+import passport from "passport";
+import { Strategy as GoogleStrategy } from "passport-google-oauth20";
+import User from "./Models/User.js";
+
+dotenv.config();
+ConnectDB();
+
+const app = express();
+
+app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+app.use(express.json());
+app.use(passport.initialize());
+
+// Passport Google Strategy
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: "/auth/google/callback",
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      const { id, displayName, emails } = profile;
+      const email = emails[0].value;
+      try {
+        let user = await User.findOne({ email });
+        if (!user) {
+          user = await User.create({ googleId: id, name: displayName, email });
+        }
+        done(null, user);
+      } catch (err) {
+        done(err, false);
+      }
+    }
+  )
+);
+
+app.use("/auth", authRoutes);
+
+// Protected route example
+app.get("/dashboard", async (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ message: "Unauthorized" });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    res.json({ message: "Welcome to dashboard", user });
+  } catch (err) {
+    res.status(401).json({ message: "Invalid token" });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
